@@ -48,4 +48,21 @@ public class AccountTests extends BaseTest {
                 .get("https://api.imgur.com/3/account/{username}", username)
                 .prettyPeek();
     }
+
+    @Test
+    void getAccountInfoWithAssertionsInGivenSimpleTest() {
+        given()
+                .header("Authorization", token)
+                .log()
+                .method()
+                .log()
+                .uri()
+                .expect()
+                .statusCode(200)
+                .body("data.url", equalTo(username))
+                .contentType("application/json")
+                .when()
+                .get("https://api.imgur.com/3/account/{username}", username)
+                .prettyPeek();
+    }
 }
