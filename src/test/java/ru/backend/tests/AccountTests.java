@@ -18,7 +18,7 @@ public class AccountTests extends BaseTest {
     @Test
     void getAccountInfoWithLoggingTest() {
         given()
-                .header("Authorization", token)
+                .header("Authorization", "Bearer e6c67f69b5d5ca42ec9f1c7b45e057ddd5c4269b")
                 .log()
                 .method()
                 .log()
