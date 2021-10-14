@@ -8,11 +8,9 @@ public class AccountTests extends BaseTest {
     @Test
     void getAccountInfoTest() {
         given()
-                .header("Authorization", token)
+                .spec(requestSpecificationWithAuth)
                 .when()
-                .get("https://api.imgur.com/3/account/{username}", username)
-                .then()
-                .statusCode(200);
+                .get("https://api.imgur.com/3/account/{username}", username);
     }
 
     @Test

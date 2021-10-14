@@ -15,11 +15,12 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.util.Properties;
 
-import static org.hamcrest.Matchers.equalTo;
-import static org.hamcrest.Matchers.is;
+import static org.hamcrest.Matchers.*;
 
 public abstract class BaseTest {
     static ResponseSpecification positiveResponseSpecification;
+    static ResponseSpecification notFoundResponseSpecification;
+    static ResponseSpecification badRequestResponseSpecification;
     static RequestSpecification requestSpecificationWithAuth;
 
     static Properties properties = new Properties();
@@ -37,9 +38,22 @@ public abstract class BaseTest {
 
         positiveResponseSpecification = new ResponseSpecBuilder()
                 .expectBody("status", equalTo(200))
+                //.expectBody("id", is(notNullValue()))
                 .expectBody("success", is(true))
                 .expectContentType(ContentType.JSON)
                 .expectStatusCode(200)
+                .build();
+
+        badRequestResponseSpecification = new ResponseSpecBuilder()
+                .expectBody("status", equalTo(400))
+                .expectBody("data.error", equalTo("Bad Request"))
+                .expectBody("success", is(false))
+                .expectContentType(ContentType.JSON)
+                .expectStatusCode(400)
+                .build();
+
+        notFoundResponseSpecification = new ResponseSpecBuilder()
+                .expectStatusCode(404)
                 .build();
 
         requestSpecificationWithAuth = new RequestSpecBuilder()

@@ -1,10 +1,15 @@
 package ru.backend.tests;
 
+import io.restassured.builder.MultiPartSpecBuilder;
+import io.restassured.builder.RequestSpecBuilder;
+import io.restassured.specification.MultiPartSpecification;
+import io.restassured.specification.RequestSpecification;
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.lang3.RandomStringUtils;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import ru.backend.dto.PostImageResponce;
 
 import java.io.File;
 import java.io.IOException;
@@ -12,6 +17,7 @@ import java.util.Base64;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.*;
+import static ru.backend.Endpoints.*;
 
 // не понятно как правильно делать сценарии - вызывать функции-тесты или писать заново
 // не понятно как получить json при 404, а не html
@@ -23,202 +29,246 @@ public class ImageTests extends BaseTest {
     private final String PATH_TO_EMPTY_IMAGE = "src/test/resources/empty.jpg";
     private final String PATH_TO_VIDEO = "src/test/resources/video.mp4";
     static String encodedFile;
-    String uploadedFileId;
+    String fileId;
+    String fileDeleteHash;
+    MultiPartSpecification base64MultiPartSpec;
+    MultiPartSpecification multiPartSpecWithImage;
+    MultiPartSpecification multiPartSpecWithEmptyImage;
+    MultiPartSpecification multiPartSpecWithNotImage;
+    MultiPartSpecification multiPartSpecWithVideo;
+    static RequestSpecification requestSpecificationWithAuthAndMultiPartImage;
+    static RequestSpecification requestSpecificationWithAuthAndBase64;
+    static RequestSpecification requestSpecificationWithAuthAndForm;
+    static RequestSpecification requestSpecificationWithAuthAndmultiPartSpecWithNotImage;
+    static RequestSpecification requestSpecificationWithAuthAndmultiPartSpecWithEmptyImage;
+    static RequestSpecification requestSpecificationWithAuthAndmultiPartSpecWithVideo;
+    PostImageResponce postImageResponce;
 
     @BeforeEach
     void beforeTest() {
         byte[] byteArray = getFileContent();
         encodedFile = Base64.getEncoder().encodeToString(byteArray);
+
+        base64MultiPartSpec = new MultiPartSpecBuilder(encodedFile)
+                .controlName("image")
+                .build();
+
+        multiPartSpecWithImage = new MultiPartSpecBuilder(new File(PATH_TO_IMAGE))
+                .controlName("image")
+                .build();
+
+        multiPartSpecWithNotImage = new MultiPartSpecBuilder(new File(PATH_TO_NOT_AN_IMAGE))
+                .controlName("image")
+                .build();
+
+        multiPartSpecWithEmptyImage = new MultiPartSpecBuilder(new File(PATH_TO_EMPTY_IMAGE))
+                .controlName("image")
+                .build();
+
+        multiPartSpecWithVideo = new MultiPartSpecBuilder(new File(PATH_TO_IMAGE))
+                .controlName("video")
+                .build();
+
+        requestSpecificationWithAuthAndForm = new RequestSpecBuilder()
+                .addRequestSpecification(requestSpecificationWithAuth)
+                .addFormParam("title", "File title")
+                .addFormParam("description", "File description")
+                .build();
+
+        requestSpecificationWithAuthAndMultiPartImage = new RequestSpecBuilder()
+                .addRequestSpecification(requestSpecificationWithAuthAndForm)
+                .addMultiPart(multiPartSpecWithImage)
+                .build();
+
+        requestSpecificationWithAuthAndBase64 = new RequestSpecBuilder()
+                .addRequestSpecification(requestSpecificationWithAuth)
+                .addFormParam("title", "Base64 image title")
+                .addFormParam("description", "Base64 image description")
+                .addMultiPart(base64MultiPartSpec)
+                .build();
+
+        requestSpecificationWithAuthAndmultiPartSpecWithNotImage = new RequestSpecBuilder()
+                .addRequestSpecification(requestSpecificationWithAuthAndForm)
+                .addMultiPart(multiPartSpecWithNotImage)
+                .build();
+
+        requestSpecificationWithAuthAndmultiPartSpecWithEmptyImage = new RequestSpecBuilder()
+                .addRequestSpecification(requestSpecificationWithAuthAndForm)
+                .addMultiPart(multiPartSpecWithEmptyImage)
+                .build();
+
+        requestSpecificationWithAuthAndmultiPartSpecWithVideo = new RequestSpecBuilder()
+                .addRequestSpecification(requestSpecificationWithAuthAndForm)
+                .addMultiPart(multiPartSpecWithVideo)
+                .build();
     }
 
     @Test
-    void uploadImageTest() {
-        uploadedFileId = given()
-                .header("Authorization", token)
-                .multiPart("image", encodedFile)
-                .formParam("title", "ImageTitle")
-                .expect()
-                .body("success", is(true))
-                .body("status", equalTo(200))
-                .body("data.id", is(notNullValue()))
-                .contentType("application/json")
-                .when()
-                .post("https://api.imgur.com/3/image")
+    void uploadImageWithDeserializeTest() {
+        postImageResponce = given(requestSpecificationWithAuthAndMultiPartImage, positiveResponseSpecification)
+                .post(UPLOAD_FILE)
                 .prettyPeek()
                 .then()
                 .extract()
-                .response()
-                .jsonPath()
-                .getString("data.deletehash");
+                .body()
+                .as(PostImageResponce.class);
+        fileDeleteHash = postImageResponce.getData().getDeletehash();
+        fileId = postImageResponce.getData().getId();
+    }
+
+    @Test
+    void deleteImageTest() {
+        // как сделать чтобы после этого теста не выполнялся aftereach?
+        uploadImageWithDeserializeTest();
+        given(requestSpecificationWithAuth, positiveResponseSpecification)
+                .delete(DELETE_FILE, fileDeleteHash)
+                .prettyPeek();
+    }
+
+    @Test
+    void deleteAfterDeleteImageTest() {
+        deleteImageTest();
+        given(requestSpecificationWithAuth, notFoundResponseSpecification)
+                .delete(DELETE_FILE, fileDeleteHash)
+                .prettyPeek();
     }
 
     @Test
     void uploadNothing() {
-        uploadedFileId = given()
-                .header("Authorization", token)
-                .formParam("title", "ImageTitle")
+        // можно ли дать на вход given только responce specification
+        postImageResponce = given()
                 .expect()
                 .statusCode(400)
                 .body("success", is(false))
                 .body("data.error", equalTo("Bad Request"))
                 .contentType("application/json")
                 .when()
-                .post("https://api.imgur.com/3/upload")
+                .post(UPLOAD_FILE)
                 .prettyPeek()
                 .then()
                 .extract()
-                .response()
-                .jsonPath()
-                .getString("data.deletehash");
+                .body()
+                .as(PostImageResponce.class);
+        fileDeleteHash = postImageResponce.getData().getDeletehash();
     }
 
     @Test
     void uploadNotAnImageTest() {
-        uploadedFileId = given()
-                .header("Authorization", token)
-                .multiPart("image", new File(PATH_TO_NOT_AN_IMAGE))
-                .formParam("title", "ImageTitle")
-                .expect()
-                .statusCode(400)
-                .body("success", is(false))
-                .body("data.error", equalTo("We don't support that file type!"))
-                .contentType("application/json")
-                .when()
-                .post("https://api.imgur.com/3/upload")
+        postImageResponce = given(requestSpecificationWithAuthAndmultiPartSpecWithNotImage, badRequestResponseSpecification)
+                .post(UPLOAD_FILE)
                 .prettyPeek()
                 .then()
                 .extract()
-                .response()
-                .jsonPath()
-                .getString("data.deletehash");
+                .body()
+                .as(PostImageResponce.class);
+        fileDeleteHash = postImageResponce.getData().getDeletehash();
     }
 
     @Test
     void uploadEmptyImageTest() {
-        uploadedFileId = given()
-                .header("Authorization", token)
-                .multiPart("image", new File(PATH_TO_EMPTY_IMAGE))
-                .formParam("title", "ImageTitle")
-                .expect()
-                .statusCode(400)
-                .body("success", is(false))
-                .body("data.error", equalTo("Bad request"))
-                .contentType("application/json")
-                .when()
-                .post("https://api.imgur.com/3/upload")
+        postImageResponce = given(requestSpecificationWithAuthAndmultiPartSpecWithEmptyImage, badRequestResponseSpecification)
+                .post(UPLOAD_FILE)
                 .prettyPeek()
                 .then()
                 .extract()
-                .response()
-                .jsonPath()
-                .getString("data.deletehash");
+                .body()
+                .as(PostImageResponce.class);
+        fileDeleteHash = postImageResponce.getData().getDeletehash();
     }
 
     @Test
     void uploadVideoTest() {
-        uploadedFileId = given()
-                .header("Authorization", token)
-                .multiPart("video", new File(PATH_TO_VIDEO))
-                .formParam("title", "VideoTitle")
-                .expect()
-                .statusCode(200)
-                .body("success", is(true))
-                .body("status", equalTo(200))
-                .body("data.id", is(notNullValue()))
-                .contentType("application/json")
-                .when()
-                .post("https://api.imgur.com/3/upload")
+        postImageResponce = given(requestSpecificationWithAuthAndmultiPartSpecWithVideo, positiveResponseSpecification)
+                .post(UPLOAD_FILE)
                 .prettyPeek()
                 .then()
                 .extract()
-                .response()
-                .jsonPath()
-                .getString("data.deletehash");
+                .body()
+                .as(PostImageResponce.class);
+        fileDeleteHash = postImageResponce.getData().getDeletehash();
     }
 
     @Test
     void favoriteImageTest() {
-        uploadedFileId = given()
-                .header("Authorization", token)
-                .multiPart("image", new File(PATH_TO_IMAGE))
-                .formParam("title", "ImageTitle")
-                .expect()
-                .statusCode(200)
-                .when()
-                .post("https://api.imgur.com/3/upload")
-                .then()
-                .extract()
-                .response()
-                .jsonPath()
-                .getString("data.deletehash");
-        given()
-                .header("Authorization", token)
+        uploadImageWithDeserializeTest();
+        // можно ли добавить .body, если указана responce specification?
+        given(requestSpecificationWithAuth)
                 .expect()
                 .statusCode(200)
                 .body("success", is(true))
                 .body("data", equalTo("favorited"))
                 .contentType("application/json")
                 .when()
-                .post("https://api.imgur.com/3/image/{imageHash}/favorite", uploadedFileId)
+                .post(FAVORITE_FILE, fileId)
                 .prettyPeek();
     }
 
     @Test
     void unfavoriteImageTest() {
         favoriteImageTest();
-        given()
-                .header("Authorization", token)
+        given(requestSpecificationWithAuth)
                 .expect()
                 .statusCode(200)
                 .body("success", is(true))
                 .body("data", equalTo("unfavorited"))
                 .contentType("application/json")
                 .when()
-                .post("https://api.imgur.com/3/image/{imageHash}/favorite", uploadedFileId)
+                .post(FAVORITE_FILE, fileId)
                 .prettyPeek();
     }
 
     @Test
-    void favoriteUnexistingImageTest() {
+    void favoriteNonexistentImageTest() {
         String randomId = RandomStringUtils.randomAlphanumeric(7);
-        given()
-                .header("Authorization", token)
-                .expect()
-                .statusCode(404)
-                .when()
-                .post("https://api.imgur.com/3/image/{randomId}/favorite", randomId)
+        given(requestSpecificationWithAuth, notFoundResponseSpecification)
+                .post(FAVORITE_FILE, randomId)
                 .prettyPeek();
     }
 
     @Test
     void updateAndGetImageTest() {
-        String fileId = given()
-                .header("Authorization", token)
-                .multiPart("image", encodedFile)
-                .formParam("title", "ImageTitle")
-                .expect()
-                .body("status", equalTo(200))
-                .when()
-                .post("https://api.imgur.com/3/image")
-                .then()
-                .extract()
-                .response()
-                .jsonPath()
-                .getString("data.id");
-        String title = "A new title";
-        String description = "A new description";
-        given()
-                .header("Authorization", token)
-                .formParam("title", title)
-                .formParam("description", description)
+        uploadImageWithDeserializeTest();
+        String newTitle = "A new title";
+        String newDescription = "A new description";
+        given(requestSpecificationWithAuth)
+                .formParam("title", newTitle)
+                .formParam("description", newDescription)
                 .expect()
                 .statusCode(200)
                 .body("success", is(true))
                 .contentType("application/json")
                 .when()
-                .post("https://api.imgur.com/3/image/{imageDeleteHash1}", fileId);
-        given()
-                .header("Authorization", token)
+                .post(UPDATE_FILE, fileId);
+        given(requestSpecificationWithAuth)
+                .expect()
+                .statusCode(200)
+                .body("success", is(true))
+                .body("data.title", equalTo(newTitle))
+                .body("data.description", equalTo(newDescription))
+                .contentType("application/json")
+                .when()
+                .get(GET_FILE, fileId)
+                .prettyPeek();
+    }
+
+    @Test
+    void updateNothingAndGetImageTest() {
+        postImageResponce = given(requestSpecificationWithAuthAndMultiPartImage)
+                .expect()
+                .body("status", equalTo(200))
+                .when()
+                .post(UPLOAD_IMAGE)
+                .then()
+                .extract()
+                .body()
+                .as(PostImageResponce.class);
+        fileDeleteHash = postImageResponce.getData().getDeletehash();
+        fileId = postImageResponce.getData().getId();
+        String title = postImageResponce.getData().getTitle();
+        String description = postImageResponce.getData().getDescription();
+        given(requestSpecificationWithAuth, positiveResponseSpecification)
+                .post(UPDATE_FILE, fileId);
+        given(requestSpecificationWithAuth)
                 .expect()
                 .statusCode(200)
                 .body("success", is(true))
@@ -226,35 +276,40 @@ public class ImageTests extends BaseTest {
                 .body("data.description", equalTo(description))
                 .contentType("application/json")
                 .when()
-                .get("https://api.imgur.com/3/image/{imageHash}", fileId)
+                .get(GET_FILE, fileId)
                 .prettyPeek();
     }
 
     @Test
     void favoriteAfterDeleteImageTest() {
-        uploadImageTest();
-        given()
-                .header("Authorization", token)
-                .expect()
-                .statusCode(200)
-                .when()
-                .delete("https://api.imgur.com/3/image/{imageDeleteHash}", uploadedFileId);
-        given()
-                .header("Authorization", token)
-                .expect()
-                .statusCode(404)
-                .when()
-                .post("https://api.imgur.com/3/image/{imageHash}/favorite", uploadedFileId)
+        deleteImageTest();
+        given(requestSpecificationWithAuth, notFoundResponseSpecification)
+                .post(FAVORITE_FILE, fileDeleteHash)
+                .prettyPeek();
+    }
+
+    @Test
+    void updateAfterDeleteImageTest() {
+        deleteImageTest();
+        given(requestSpecificationWithAuth, notFoundResponseSpecification)
+                .post(UPDATE_FILE, fileId)
+                .prettyPeek();
+    }
+
+    @Test
+    void getAfterDeleteImageTest() {
+        deleteImageTest();
+        given(requestSpecificationWithAuth, notFoundResponseSpecification)
+                .get(GET_FILE, fileId)
                 .prettyPeek();
     }
 
     @AfterEach
     void tearDown() {
         try {
-            given()
-                    .header("Authorization", token)
+            given(requestSpecificationWithAuth)
                     .when()
-                    .delete("https://api.imgur.com/3/image/{imageDeleteHash}", uploadedFileId)
+                    .delete(DELETE_FILE, fileDeleteHash)
                     .prettyPeek()
                     .then()
                     .statusCode(200);
