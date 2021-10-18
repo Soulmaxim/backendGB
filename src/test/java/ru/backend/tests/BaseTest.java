@@ -20,8 +20,9 @@ import static org.hamcrest.Matchers.*;
 public abstract class BaseTest {
     static ResponseSpecification positiveResponseSpecification;
     static ResponseSpecification notFoundResponseSpecification;
-    static ResponseSpecification badRequestResponseSpecification;
+    static ResponseSpecification badResponseSpecification;
     static RequestSpecification requestSpecificationWithAuth;
+    static RequestSpecification requestSpecificationWithAuthAndForm;
 
     static Properties properties = new Properties();
     static String token;
@@ -38,26 +39,31 @@ public abstract class BaseTest {
 
         positiveResponseSpecification = new ResponseSpecBuilder()
                 .expectBody("status", equalTo(200))
-                //.expectBody("id", is(notNullValue()))
                 .expectBody("success", is(true))
                 .expectContentType(ContentType.JSON)
                 .expectStatusCode(200)
                 .build();
 
-        badRequestResponseSpecification = new ResponseSpecBuilder()
-                .expectBody("status", equalTo(400))
-                .expectBody("data.error", equalTo("Bad Request"))
-                .expectBody("success", is(false))
-                .expectContentType(ContentType.JSON)
-                .expectStatusCode(400)
-                .build();
-
         notFoundResponseSpecification = new ResponseSpecBuilder()
                 .expectStatusCode(404)
+                .expectContentType(ContentType.HTML)
                 .build();
 
         requestSpecificationWithAuth = new RequestSpecBuilder()
                 .addHeader("Authorization", token)
+                .build();
+
+        requestSpecificationWithAuthAndForm = new RequestSpecBuilder()
+                .addRequestSpecification(requestSpecificationWithAuth)
+                .addFormParam("title", "File title")
+                .addFormParam("description", "File description")
+                .build();
+
+        badResponseSpecification = new ResponseSpecBuilder()
+                .expectBody("status", equalTo(400))
+                .expectBody("success", is(false))
+                .expectContentType(ContentType.JSON)
+                .expectStatusCode(400)
                 .build();
 
 //        RestAssured.responseSpecification = positiveResponseSpecification;

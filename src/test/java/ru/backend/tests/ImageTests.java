@@ -2,8 +2,10 @@ package ru.backend.tests;
 
 import io.restassured.builder.MultiPartSpecBuilder;
 import io.restassured.builder.RequestSpecBuilder;
+import io.restassured.builder.ResponseSpecBuilder;
 import io.restassured.specification.MultiPartSpecification;
 import io.restassured.specification.RequestSpecification;
+import io.restassured.specification.ResponseSpecification;
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.lang3.RandomStringUtils;
 import org.junit.jupiter.api.AfterEach;
@@ -21,7 +23,6 @@ import static ru.backend.Endpoints.*;
 
 // не понятно как правильно делать сценарии - вызывать функции-тесты или писать заново
 // не понятно как получить json при 404, а не html
-// как сохранить одновременно и id и deletehash
 
 public class ImageTests extends BaseTest {
     private final String PATH_TO_IMAGE = "src/test/resources/image1.jpg";
@@ -38,11 +39,13 @@ public class ImageTests extends BaseTest {
     MultiPartSpecification multiPartSpecWithVideo;
     static RequestSpecification requestSpecificationWithAuthAndMultiPartImage;
     static RequestSpecification requestSpecificationWithAuthAndBase64;
-    static RequestSpecification requestSpecificationWithAuthAndForm;
     static RequestSpecification requestSpecificationWithAuthAndmultiPartSpecWithNotImage;
     static RequestSpecification requestSpecificationWithAuthAndmultiPartSpecWithEmptyImage;
     static RequestSpecification requestSpecificationWithAuthAndmultiPartSpecWithVideo;
+    static ResponseSpecification badRequestResponseSpecification;
+    static ResponseSpecification wrongTypeResponseSpecification;
     PostImageResponce postImageResponce;
+    boolean isFileDeleted;
 
     @BeforeEach
     void beforeTest() {
@@ -65,14 +68,8 @@ public class ImageTests extends BaseTest {
                 .controlName("image")
                 .build();
 
-        multiPartSpecWithVideo = new MultiPartSpecBuilder(new File(PATH_TO_IMAGE))
+        multiPartSpecWithVideo = new MultiPartSpecBuilder(new File(PATH_TO_VIDEO))
                 .controlName("video")
-                .build();
-
-        requestSpecificationWithAuthAndForm = new RequestSpecBuilder()
-                .addRequestSpecification(requestSpecificationWithAuth)
-                .addFormParam("title", "File title")
-                .addFormParam("description", "File description")
                 .build();
 
         requestSpecificationWithAuthAndMultiPartImage = new RequestSpecBuilder()
@@ -101,6 +98,18 @@ public class ImageTests extends BaseTest {
                 .addRequestSpecification(requestSpecificationWithAuthAndForm)
                 .addMultiPart(multiPartSpecWithVideo)
                 .build();
+
+        badRequestResponseSpecification = new ResponseSpecBuilder()
+                .addResponseSpecification(badResponseSpecification)
+                .expectBody("data.error", equalTo("Bad Request"))
+                .build();
+
+        wrongTypeResponseSpecification = new ResponseSpecBuilder()
+                .addResponseSpecification(badResponseSpecification)
+                .expectBody("data.error", equalTo("We don't support that file type!"))
+                .build();
+
+
     }
 
     @Test
@@ -114,6 +123,7 @@ public class ImageTests extends BaseTest {
                 .as(PostImageResponce.class);
         fileDeleteHash = postImageResponce.getData().getDeletehash();
         fileId = postImageResponce.getData().getId();
+        isFileDeleted = false;
     }
 
     @Test
@@ -123,12 +133,24 @@ public class ImageTests extends BaseTest {
         given(requestSpecificationWithAuth, positiveResponseSpecification)
                 .delete(DELETE_FILE, fileDeleteHash)
                 .prettyPeek();
+        isFileDeleted = true;
     }
 
     @Test
     void deleteAfterDeleteImageTest() {
-        deleteImageTest();
-        given(requestSpecificationWithAuth, notFoundResponseSpecification)
+        uploadImageWithDeserializeTest();
+        given(requestSpecificationWithAuth)
+                .delete(DELETE_FILE, fileDeleteHash);
+        isFileDeleted = true;
+//        это не работает:
+//        given(requestSpecificationWithAuth, notFoundResponseSpecification)
+//                .delete(DELETE_FILE, fileDeleteHash)
+//                .prettyPeek();
+//        нельзя использовать несколько ResponseSpecification в пределах одного теста?
+        given(requestSpecificationWithAuth)
+                .expect()
+                .statusCode(404)
+                .when()
                 .delete(DELETE_FILE, fileDeleteHash)
                 .prettyPeek();
     }
@@ -154,7 +176,7 @@ public class ImageTests extends BaseTest {
 
     @Test
     void uploadNotAnImageTest() {
-        postImageResponce = given(requestSpecificationWithAuthAndmultiPartSpecWithNotImage, badRequestResponseSpecification)
+        postImageResponce = given(requestSpecificationWithAuthAndmultiPartSpecWithNotImage, wrongTypeResponseSpecification)
                 .post(UPLOAD_FILE)
                 .prettyPeek()
                 .then()
@@ -219,8 +241,12 @@ public class ImageTests extends BaseTest {
 
     @Test
     void favoriteNonexistentImageTest() {
+        // спецификация с кодом 404 не работает (из-за того, что не приходит json ответ?)
         String randomId = RandomStringUtils.randomAlphanumeric(7);
-        given(requestSpecificationWithAuth, notFoundResponseSpecification)
+        given(requestSpecificationWithAuth)
+                .expect()
+                .statusCode(404)
+                .when()
                 .post(FAVORITE_FILE, randomId)
                 .prettyPeek();
     }
@@ -238,7 +264,7 @@ public class ImageTests extends BaseTest {
                 .body("success", is(true))
                 .contentType("application/json")
                 .when()
-                .post(UPDATE_FILE, fileId);
+                .post(UPDATE_FILE, fileDeleteHash);
         given(requestSpecificationWithAuth)
                 .expect()
                 .statusCode(200)
@@ -253,11 +279,12 @@ public class ImageTests extends BaseTest {
 
     @Test
     void updateNothingAndGetImageTest() {
-        postImageResponce = given(requestSpecificationWithAuthAndMultiPartImage)
+        postImageResponce = given(requestSpecificationWithAuthAndBase64)
                 .expect()
                 .body("status", equalTo(200))
                 .when()
                 .post(UPLOAD_IMAGE)
+                .prettyPeek()
                 .then()
                 .extract()
                 .body()
@@ -266,8 +293,17 @@ public class ImageTests extends BaseTest {
         fileId = postImageResponce.getData().getId();
         String title = postImageResponce.getData().getTitle();
         String description = postImageResponce.getData().getDescription();
-        given(requestSpecificationWithAuth, positiveResponseSpecification)
-                .post(UPDATE_FILE, fileId);
+//        не ясно почему, но это тут не работает
+//        given(requestSpecificationWithAuth, positiveResponseSpecification)
+//                .post(UPDATE_FILE, fileDeleteHash);
+        given(requestSpecificationWithAuth)
+                .expect()
+                .body("status", equalTo(200))
+                .body("success", is(true))
+                .contentType("application/json")
+                .statusCode(200)
+                .when()
+                .post(UPDATE_FILE, fileDeleteHash);
         given(requestSpecificationWithAuth)
                 .expect()
                 .statusCode(200)
@@ -282,24 +318,42 @@ public class ImageTests extends BaseTest {
 
     @Test
     void favoriteAfterDeleteImageTest() {
-        deleteImageTest();
-        given(requestSpecificationWithAuth, notFoundResponseSpecification)
-                .post(FAVORITE_FILE, fileDeleteHash)
+        uploadImageWithDeserializeTest();
+        given(requestSpecificationWithAuth)
+                .delete(DELETE_FILE, fileDeleteHash);
+        isFileDeleted = true;
+        given(requestSpecificationWithAuth)
+                .expect()
+                .statusCode(404)
+                .when()
+                .post(FAVORITE_FILE, fileId)
                 .prettyPeek();
     }
 
     @Test
     void updateAfterDeleteImageTest() {
-        deleteImageTest();
-        given(requestSpecificationWithAuth, notFoundResponseSpecification)
-                .post(UPDATE_FILE, fileId)
+        uploadImageWithDeserializeTest();
+        given(requestSpecificationWithAuth)
+                .delete(DELETE_FILE, fileDeleteHash);
+        isFileDeleted = true;
+        given(requestSpecificationWithAuth)
+                .expect()
+                .statusCode(404)
+                .when()
+                .post(UPDATE_FILE, fileDeleteHash)
                 .prettyPeek();
     }
 
     @Test
     void getAfterDeleteImageTest() {
-        deleteImageTest();
-        given(requestSpecificationWithAuth, notFoundResponseSpecification)
+        uploadImageWithDeserializeTest();
+        given(requestSpecificationWithAuth)
+                .delete(DELETE_FILE, fileDeleteHash);
+        isFileDeleted = true;
+        given(requestSpecificationWithAuth)
+                .expect()
+                .statusCode(404)
+                .when()
                 .get(GET_FILE, fileId)
                 .prettyPeek();
     }
@@ -307,6 +361,8 @@ public class ImageTests extends BaseTest {
     @AfterEach
     void tearDown() {
         try {
+            System.out.println("\nTeardown\n");
+            if (isFileDeleted) return;
             given(requestSpecificationWithAuth)
                     .when()
                     .delete(DELETE_FILE, fileDeleteHash)
